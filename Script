@@ -1,0 +1,120 @@
+import pandas as pd
+
+# 1. Load your specific dataset
+file_name = 'Train_Inpatientdata-1542865627584.csv'
+df = pd.read_csv(file_name)
+
+print("--- Data Integrity Audit: Inpatient Claims ---")
+
+# 2. Check for missing values in critical fields
+# (Useful for showing you care about data completeness)
+missing = df[['BeneID', 'ClaimID', 'Provider', 'InscClaimAmtReimbursed']].isnull().sum()
+print("\nMissing Values in Core Fields:")
+print(missing)
+
+# 3. Identify "Zero-Reimbursement" claims
+# In a professional audit, we flag cases where insurance paid nothing
+# but the patient was admitted.
+invalid_financials = df[df['InscClaimAmtReimbursed'] <= 0]
+print(f"\nFlagged {len(invalid_financials)} records with zero or negative reimbursement.")
+
+# 4. Find Potential Double-Billing (The Anomaly)
+# We check if the same Patient (BeneID) and Provider had two different 
+# claims starting on the exact same date.
+duplicates = df[df.duplicated(subset=['BeneID', 'Provider', 'ClaimStartDt'], keep=False)]
+print(f"Flagged {len(duplicates)} potential duplicate/overlapping claims.")
+
+# 5. Export the findings for "Manual Review"
+if len(duplicates) > 0:
+    duplicates.to_csv('audit_report_duplicates.csv', index=False)
+    print("\nSUCCESS: Anomaly report saved to 'audit_report_duplicates.csv'")
+
+    # --- STEP 4: STATISTICAL ANOMALY DETECTION ---
+
+print("\n--- Running Statistical Risk Profile ---")
+
+# 1. Calculate the 'Normal' range for reimbursements
+mean_reimb = df['InscClaimAmtReimbursed'].mean()
+std_reimb = df['InscClaimAmtReimbursed'].std()
+threshold = mean_reimb + (3 * std_reimb)
+
+print(f"Average Reimbursement: R{mean_reimb:,.2f}")
+print(f"High-Risk Threshold (3 Std Dev): R{threshold:,.2f}")
+
+# 2. Identify the 'Extreme' Outliers
+outliers = df[df['InscClaimAmtReimbursed'] > threshold]
+
+print(f"\nFlagged {len(outliers)} claims as 'Extreme Outliers' (Over R{threshold:,.2f})")
+
+# 3. Analyze the Top 5 most expensive claims
+print("\nTop 5 Most Expensive Claims (High Priority):")
+print(outliers[['BeneID', 'ClaimID', 'Provider', 'InscClaimAmtReimbursed']].sort_values(by='InscClaimAmtReimbursed', ascending=False).head())
+
+# 4. Export these for the Fraud Investigation Team
+outliers.to_csv('high_priority_risk_claims.csv', index=False)
+print("\nSUCCESS: Risk report saved to 'high_priority_risk_claims.csv'")
+
+# --- STEP 5: PROVIDER RISK PROFILING ---
+
+print("\n--- Identifying High-Risk Providers ---")
+
+# 1. Group by Provider and calculate total stats
+# We want to see: Total reimbursed, Count of claims, and Average per claim
+provider_analysis = df.groupby('Provider')['InscClaimAmtReimbursed'].agg(['sum', 'count', 'mean']).reset_index()
+
+# 2. Rename columns for clarity (making it 'Zero-Error' professional)
+provider_analysis.columns = ['Provider_ID', 'Total_Reimbursed', 'Claim_Count', 'Avg_Claim_Amount']
+
+# 3. Find providers who have more than 50 claims (High Volume) 
+# and an Average Claim Amount above our 3-Sigma Threshold
+high_risk_providers = provider_analysis[provider_analysis['Avg_Claim_Amount'] > 20000].sort_values(by='Total_Reimbursed', ascending=False)
+
+print("\nTop 5 Providers by Total Financial Impact:")
+print(high_risk_providers.head())
+
+# 4. Save this list for the Management Report
+high_risk_providers.to_csv('provider_risk_profile.csv', index=False)
+print("\nSUCCESS: Provider risk profiles saved to 'provider_risk_profile.csv'")
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# --- STEP 6: RISK VISUALIZATION ---
+
+print("\n--- Generating Risk Visualization ---")
+
+# Set the style
+plt.figure(figsize=(12, 7))
+sns.set_style("whitegrid")
+
+# Create the scatter plot
+# We plot Number of Claims vs Total Money
+scatter = sns.scatterplot(
+    data=provider_analysis, 
+    x='Claim_Count', 
+    y='Total_Reimbursed', 
+    alpha=0.6, 
+    color='skyblue'
+)
+
+# Highlight your top-risk provider (PRV51067) in Red
+top_risk = provider_analysis[provider_analysis['Provider_ID'] == 'PRV51067']
+plt.scatter(
+    top_risk['Claim_Count'], 
+    top_risk['Total_Reimbursed'], 
+    color='red', 
+    s=100, 
+    label='High-Risk Target (PRV51067)'
+)
+
+# Labeling the chart for a professional look
+plt.title('Provider Risk Analysis: Volume vs. Financial Impact', fontsize=15)
+plt.xlabel('Total Number of Claims', fontsize=12)
+plt.ylabel('Total Reimbursed Amount (Millions)', fontsize=12)
+plt.legend()
+
+# Save the plot as an image for your portfolio/presentation
+plt.savefig('healthcare_risk_analysis.png')
+print("SUCCESS: Visualization saved as 'healthcare_risk_analysis.png'")
+
+plt.show()
